@@ -108,15 +108,22 @@ test("patchVaultFile serializuje frontmatter z polskimi znakami", async () => {
   assert.equal(body.content, JSON.stringify({ nazwa: "Łódź", liczba: 2 }));
 });
 
-test("patchVaultFile search-replace nie wymaga targetType", async () => {
-  const recorder = createFetchRecorder(() =>
-    new Response("wynik", { status: 200, headers: { "content-type": MARKDOWN_CONTENT_TYPE } }),
+function createSearchReplaceClient(fileContent: string) {
+  const recorder = createFetchRecorder((_url, init) =>
+    (init as { method?: string }).method === "PUT"
+      ? new Response(null, { status: 204 })
+      : new Response(fileContent, { status: 200, headers: { "content-type": MARKDOWN_CONTENT_TYPE } }),
   );
   const client = new ObsidianRestClient({
     baseUrl: "http://obsidian.test",
     apiKey: "sekret",
     fetchImpl: recorder.fetch,
   });
+  return { client, recorder };
+}
+
+test("patchVaultFile search-replace podmienia fragment przez GET + PUT, bez targetType", async () => {
+  const { client, recorder } = createSearchReplaceClient("# Zadania\n- [ ] B4 — Łódź\n- [ ] B5\n");
 
   await client.patchVaultFile({
     filename: "test.md",
@@ -125,12 +132,36 @@ test("patchVaultFile search-replace nie wymaga targetType", async () => {
     content: "- [x] B4",
   });
 
-  const body = JSON.parse(recorder.calls[0].init.body!);
-  assert.equal(body.operation, "search-replace");
-  assert.equal(body.target, "- [ ] B4");
-  assert.equal(body.content, "- [x] B4");
-  assert.equal(body.targetType, undefined);
-  assert.equal(body.createTargetIfMissing, undefined);
+  assert.equal(recorder.calls.length, 2);
+  assert.equal(recorder.calls[0].init.method ?? "GET", "GET");
+  assert.equal(recorder.calls[1].init.method, "PUT");
+  assert.equal(recorder.calls[1].url, "http://obsidian.test/vault/test.md");
+  assert.equal(recorder.calls[1].init.body, "# Zadania\n- [x] B4 — Łódź\n- [ ] B5\n");
+});
+
+test("patchVaultFile search-replace odrzuca brakujący i niejednoznaczny target bez zapisu", async () => {
+  const missing = createSearchReplaceClient("abc");
+  await assert.rejects(
+    missing.client.patchVaultFile({ filename: "t.md", operation: "search-replace", target: "xyz", content: "1" }),
+    /nie znaleziono/,
+  );
+  assert.equal(missing.recorder.calls.length, 1);
+
+  const twice = createSearchReplaceClient("- [ ] B4\n- [ ] B4\n");
+  await assert.rejects(
+    twice.client.patchVaultFile({ filename: "t.md", operation: "search-replace", target: "- [ ] B4", content: "x" }),
+    /więcej niż raz/,
+  );
+  assert.equal(twice.recorder.calls.length, 1);
+});
+
+test("patchActiveFile search-replace działa na aktywnym pliku", async () => {
+  const { client, recorder } = createSearchReplaceClient("stary tekst");
+
+  await client.patchActiveFile({ operation: "search-replace", target: "stary", content: "nowy" });
+
+  assert.equal(recorder.calls[1].url, "http://obsidian.test/active/");
+  assert.equal(recorder.calls[1].init.body, "nowy tekst");
 });
 
 test("normalizeVaultPath odrzuca traversal i zachowuje zwykłe ścieżki", () => {

@@ -113,6 +113,10 @@ export class ObsidianRestClient {
   }
 
   async patchActiveFile(args: PatchArgs): Promise<unknown> {
+    if (args.operation === "search-replace") {
+      return this.searchReplace("/active/", args);
+    }
+
     return this.request("/active/", {
       method: "PATCH",
       headers: { "Content-Type": JSON_CONTENT_TYPE },
@@ -195,12 +199,44 @@ export class ObsidianRestClient {
   }
 
   async patchVaultFile({ filename, ...args }: PatchArgs & { filename: string }): Promise<unknown> {
+    if (args.operation === "search-replace") {
+      return this.searchReplace(`/vault/${encodeVaultPath(filename)}`, args);
+    }
+
     return this.request(`/vault/${encodeVaultPath(filename)}`, {
       method: "PATCH",
       headers: { "Content-Type": JSON_CONTENT_TYPE },
       body: buildPatchBody(args),
       responseType: "text",
     });
+  }
+
+  // obsidian-local-rest-api nie obsługuje search-replace w PATCH, więc robimy to po stronie klienta:
+  // GET → podmiana dokładnie jednego wystąpienia → PUT. Działa z każdym backendem REST.
+  private async searchReplace(path: string, { target, content }: PatchArgs): Promise<string> {
+    const search = assertText(target, "target");
+    const replacement = typeof content === "string" ? content : JSON.stringify(content);
+    const current = await this.request(path, {
+      headers: { Accept: MARKDOWN_CONTENT_TYPE },
+      responseType: "text",
+    }) as string;
+
+    const first = current.indexOf(search);
+    if (first === -1) {
+      throw new Error("search-replace: nie znaleziono `target` w pliku.");
+    }
+    if (current.indexOf(search, first + 1) !== -1) {
+      throw new Error("search-replace: `target` występuje w pliku więcej niż raz — podaj dłuższy, unikalny fragment.");
+    }
+
+    await this.request(path, {
+      method: "PUT",
+      headers: { "Content-Type": MARKDOWN_CONTENT_TYPE },
+      body: current.slice(0, first) + replacement + current.slice(first + search.length),
+      responseType: "none",
+    });
+
+    return "search-replace: podmieniono 1 wystąpienie.";
   }
 
   async deleteVaultFile(filename: string): Promise<void> {
