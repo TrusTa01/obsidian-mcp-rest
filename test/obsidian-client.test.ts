@@ -75,7 +75,7 @@ test("patchVaultFile wysyła JSON body z Unicode w ścieżce i polskimi znakami"
   const body = JSON.parse(recorder.calls[0].init.body!);
   assert.equal(body.operation, "append");
   assert.equal(body.targetType, "heading");
-  assert.equal(body.target, "Nagłówek główny::Sekcja ąę");
+  assert.deepEqual(body.target, ["Nagłówek główny", "Sekcja ąę"]);
   assert.equal(body.content, "Dopisane źć");
   assert.equal(body.trimTargetWhitespace, true);
   assert.equal(body.createTargetIfMissing, true);

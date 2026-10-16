@@ -34,9 +34,12 @@ export function buildPatchBody({
     throw new TypeError("`target` musi być niepustym stringiem.");
   }
 
+  // obsidian-local-rest-api (PATCH v3, JSON body) przyjmuje nagłówek tylko jako tablicę ścieżki
+  // nagłówków, więc "A::B" rozbijamy po delimiterze (domyślnie "::").
+  const isHeading = operation !== "search-replace" && targetType === "heading";
   const body: Record<string, unknown> = {
     operation,
-    target,
+    target: isHeading ? target.split(targetDelimiter ?? "::").map((part) => part.trim()) : target,
     content: typeof content === "string" ? content : JSON.stringify(content),
   };
 
@@ -45,7 +48,7 @@ export function buildPatchBody({
     body.createTargetIfMissing = createTargetIfMissing;
   }
 
-  if (targetDelimiter !== undefined) {
+  if (targetDelimiter !== undefined && !isHeading) {
     body.targetDelimiter = targetDelimiter;
   }
   if (trimTargetWhitespace !== undefined) {
